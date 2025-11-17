@@ -262,10 +262,11 @@ Formato de Saída: Retorne APENAS um objeto JSON com o formato: {"enigmas": [{"e
          * Função de chamada da API com lógica de retentativa.
          */
         async function callGeminiAPI(payload, attempt = 1) {
+            // Agora chamamos o endpoint local '/generate-enigmas'
+            // O backend (server.js) injeta a API Key a partir do .env e faz a chamada segura ao Google.
             const MAX_RETRIES = 3;
             const BASE_DELAY = 1000;
-            const apiKey = ""; // Deixe em branco
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const apiUrl = `/generate-enigmas`;
 
             try {
                 const response = await fetch(apiUrl, {
@@ -285,14 +286,16 @@ Formato de Saída: Retorne APENAS um objeto JSON com o formato: {"enigmas": [{"e
                 }
 
                 const result = await response.json();
-                
-                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0].text) {
+
+                // O backend repassa diretamente o JSON retornado pela API do Google.
+                // Mantemos a mesma lógica de parse que existia antes.
+                if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts[0].text) {
                     return JSON.parse(result.candidates[0].content.parts[0].text);
                 } else {
-                    console.warn('Resposta da API inesperada:', result);
+                    console.warn('Resposta da API inesperada (via backend):', result);
                     throw new Error('A API retornou uma resposta vazia ou em formato inesperado.');
                 }
-                
+
             } catch (error) {
                 if (attempt < MAX_RETRIES && error.message.includes('429')) {
                     const delay = BASE_DELAY * Math.pow(2, attempt - 1);

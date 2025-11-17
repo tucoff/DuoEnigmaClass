@@ -1,10 +1,9 @@
-## Duo Enigma Class
- 
+# Duo Enigma Class
+
+> (Interface atual da ferramenta no Desktop.)
 <img width="1920" height="1080" alt="PagSprint3" src="https://github.com/user-attachments/assets/afbbb596-6c0d-4a55-ad61-b8b54fd58197" />
 
-# 🤖 Gerador de Enigmas Cooperativos
-
-> (A imagem acima já existente permanece aqui — o conteúdo novo começa abaixo.)
+## 🤖 Gerador de Enigmas Cooperativos
 
 🎯 1. A Ideia (O Conceito Abstrato)
 

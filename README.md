@@ -45,7 +45,7 @@ Para resolver isso, a arquitetura usa um servidor Node.js (arquivo `servidor_loc
 
 Essa abordagem protege a chave e evita erros de CORS ao mesmo tempo em que mantém a UX simples para o professor (apenas abrir `http://localhost:3000` ou o HTML servido pelo servidor).
 
-🚀 3. Funcionalidades Complexas (O "Nível Gênio")
+🚀 3. Funcionalidades Complexas
 
 O projeto vai além de um gerador de imagem-para-enigma simples. Há várias lógicas pensadas para robustez e uso em sala de aula:
 

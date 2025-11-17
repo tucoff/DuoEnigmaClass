@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerador de Enigmas Cooperativos (v2)</title>
+    <!-- Carrega o Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carrega a biblioteca jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+
+    <div class="container mx-auto max-w-3xl p-6">
+        
+        <!-- Cabeçalho -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-blue-700">Gerador de Enigmas Cooperativos</h1>
+            <p class="text-lg text-gray-600 mt-2">
+                A ferramenta do professor para criar atividades de comunicação baseadas em livros didáticos.
+            </p>
+        </header>
+
+        <!-- Seção de Instruções -->
+        <div class="bg-blue-50 border-l-4 border-blue-500 text-blue-700 p-4 rounded-lg mb-6">
+            <h3 class="font-bold mb-2">Como funciona:</h3>
+            <ol class="list-decimal list-inside space-y-1">
+                <li>Faça o upload de **quantas fotos quiser** das páginas do livro.</li>
+                <li>O sistema irá agrupar as fotos e gerar um banco de enigmas.</li>
+                <li>Clique em "Gerar Enigmas" (pode demorar um pouco se houver muitas fotos).</li>
+                <li>Revise os enigmas e baixe o PDF. O PDF conterá **5 tipos de prova** diferentes.</li>
+            </ol>
+        </div>
+
+        <!-- Seção de Upload -->
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">1. Upload das Imagens do Livro</h2>
+            <input type="file" id="imageUpload" multiple accept="image/*" 
+                   class="block w-full text-sm text-gray-500
+                          file:mr-4 file:py-2 file:px-4
+                          file:rounded-full file:border-0
+                          file:text-sm file:font-semibold
+                          file:bg-blue-50 file:text-blue-700
+                          hover:file:bg-blue-100 cursor-pointer" />
+            <div id="imagePreview" class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <!-- Pré-visualizações das imagens aparecerão aqui -->
+            </div>
+        </div>
+
+        <!-- Botão de Ação -->
+        <div class="text-center mb-6">
+            <button id="generateButton" 
+                    class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg text-lg shadow-lg hover:bg-blue-700 transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
+                Gerar Enigmas
+            </button>
+            <div id="loadingIndicator" class="hidden mt-4 text-center">
+                <div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] text-blue-600" role="status">
+                    <span class="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">
+                        Gerando...
+                    </span>
+                </div>
+                <p id="loadingMessage" class="text-gray-600 mt-2">Analisando imagens...</p>
+            </div>
+        </div>
+
+        <!-- Seção de Resultados -->
+        <div id="resultsSection" class="hidden bg-white p-6 rounded-lg shadow-md mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-semibold text-gray-800">2. Banco de Enigmas Gerados</h2>
+                <button id="downloadPdfButton" 
+                        class="bg-green-600 text-white font-bold py-2 px-5 rounded-lg shadow-md hover:bg-green-700 transition-colors duration-300">
+                    Baixar PDF (5 Tipos de Prova)
+                </button>
+            </div>
+            <p id="resultsSummary" class="text-gray-600 mb-4"></p>
+            <div id="enigmasList" class="space-y-4 max-h-96 overflow-y-auto pr-2">
+                <!-- Enigmas gerados aparecerão aqui -->
+            </div>
+        </div>
+
+    </div>
+
+    <script type"module">
+        // Importa o jsPDF
+        const { jsPDF } = window.jspdf;
+        
+        // Estado da aplicação
+        const state = {
+            images: [], // Armazena os objetos de imagem para a API
+            generatedBatches: [], // Armazena os *resultados* dos lotes: [{enigmas: [...]}, {enigmas: [...]}]
+        };
+
+        // Constantes
+        const BATCH_SIZE = 10; // A IA aceita 10 imagens por vez
+        const ENIGMAS_PER_BATCH = 5; // Queremos 5 enigmas por lote de 10 imagens
+        const NUM_PROVAS = ENIGMAS_PER_BATCH; // 5 Tipos de Prova
+
+        // Elementos do DOM
+        const imageUpload = document.getElementById('imageUpload');
+        const imagePreview = document.getElementById('imagePreview');
+        const generateButton = document.getElementById('generateButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const loadingMessage = document.getElementById('loadingMessage');
+        const resultsSection = document.getElementById('resultsSection');
+        const resultsSummary = document.getElementById('resultsSummary');
+        const enigmasList = document.getElementById('enigmasList');
+        const downloadPdfButton = document.getElementById('downloadPdfButton');
+
+        // --- MANIPULADORES DE EVENTOS ---
+        
+        imageUpload.addEventListener('change', handleImageUpload);
+        generateButton.addEventListener('click', handleGenerateEnigmas);
+        downloadPdfButton.addEventListener('click', handleDownloadPdf);
+
+        // --- FUNÇÕES ---
+
+        /**
+         * Lida com o upload de imagens, converte para base64 e mostra pré-visualização.
+         */
+        async function handleImageUpload(event) {
+            state.images = [];
+            imagePreview.innerHTML = '';
+            
+            const files = event.target.files;
+            if (!files) return;
+
+            setLoading(true, `Processando ${files.length} imagens...`);
+
+            const filePromises = Array.from(files).map(file => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => {
+                        const base64Data = e.target.result.split(',')[1];
+                        
+                        // Mostra pré-visualização
+                        const imgElement = document.createElement('img');
+                        imgElement.src = e.target.result;
+                        imgElement.className = 'w-full h-auto object-cover rounded-md border border-gray-300';
+                        imagePreview.appendChild(imgElement);
+
+                        resolve({
+                            inlineData: {
+                                mimeType: file.type,
+                                data: base64Data
+                            }
+                        });
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            });
+
+            try {
+                state.images = await Promise.all(filePromises);
+                setLoading(false);
+                console.log(`${state.images.length} imagens prontas.`);
+            } catch (error) {
+                setLoading(false);
+                console.error('Erro ao processar imagens:', error);
+                alert('Houve um erro ao carregar as imagens. Tente novamente.');
+            }
+        }
+
+        /**
+         * Constrói o prompt e chama a API do Gemini em lotes.
+         */
+        async function handleGenerateEnigmas() {
+            if (state.images.length === 0) {
+                alert('Por favor, faça o upload de pelo menos uma imagem.');
+                return;
+            }
+
+            setLoading(true, 'Dividindo imagens em lotes...');
+            state.generatedBatches = [];
+
+            // 1. Criar os lotes (batches)
+            const batches = [];
+            for (let i = 0; i < state.images.length; i += BATCH_SIZE) {
+                batches.push(state.images.slice(i, i + BATCH_SIZE));
+            }
+            console.log(`Imagens divididas em ${batches.length} lotes de até ${BATCH_SIZE} imagens.`);
+            
+            setLoading(true, `Enviando ${batches.length} lotes para a IA... (Isso pode demorar)`);
+
+            // 2. Constrói o prompt de texto (agora com exemplos fixos)
+            const systemPrompt = `Você é um designer de jogos educacionais "nível gênio". Sua tarefa é criar ${ENIGMAS_PER_BATCH} enigmas complexos baseados exclusivamente no conteúdo das imagens fornecidas.
+
+REGRAS OBRIGATÓRIAS:
+1. Os enigmas devem ser indiretos, metafóricos ou em formato de charada. Eles NÃO podem ser perguntas diretas. O objetivo é forçar o aluno a interpretar o enigma e investigar o texto.
+2. Garanta que a resposta para cada enigma esteja claramente presente no texto das imagens.
+3. Gere exatamente ${ENIGMAS_PER_BATCH} enigmas.
+
+Use estes exemplos de outros domínios como inspiração para o ESTILO e DIFICULDADE:
+- Exemplo (Biologia): "Eu sou o processo onde a luz do sol se torna alimento. A fábrica é verde, e o que eu solto, você respira. O que sou eu?" (Resposta: Fotossíntese)
+- Exemplo (História): "Minhas caravelas buscaram as Índias, mas encontrei um 'novo mundo' em 1500. Meu nome batizou um tratado famoso, mas foi outro navegador que deu nome à terra que encontrei. Quem sou eu?" (Resposta: Pedro Álvares Cabral)
+- Exemplo (Geografia): "Eu nasço nos Andes e morro no Atlântico. Não tenho uma, mas milhares de 'veias' que cortam a maior floresta do planeta. Meu nome é o de uma guerreira mítica." (Resposta: Rio Amazonas)
+
+Formato de Saída: Retorne APENAS um objeto JSON com o formato: {"enigmas": [{"enigma": "...", "resposta": "..."}]}`;
+
+            // 3. Criar promessas de API para cada lote
+            const apiPromises = batches.map((imageBatch, index) => {
+                const payload = {
+                    contents: [
+                        {
+                            parts: [
+                                { text: systemPrompt },
+                                ...imageBatch // Adiciona as imagens deste lote
+                            ]
+                        }
+                    ],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                enigmas: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            enigma: { type: "STRING" },
+                                            resposta: { type: "STRING" }
+                                        },
+                                        required: ["enigma", "resposta"]
+                                    }
+                                }
+                            },
+                            required: ["enigmas"]
+                        }
+                    }
+                };
+                // Chama a API com um atraso para evitar "rate limiting"
+                return new Promise(resolve => setTimeout(resolve, index * 250))
+                           .then(() => callGeminiAPI(payload));
+            });
+
+            // 4. Executar todas as chamadas em paralelo
+            try {
+                const results = await Promise.all(apiPromises);
+                state.generatedBatches = results.filter(r => r && r.enigmas); // Filtra lotes que falharam
+                displayEnigmas();
+            } catch (error) {
+                console.error('Erro ao chamar API do Gemini em lotes:', error);
+                alert(`Erro ao gerar enigmas: ${error.message}\n\nVerifique o console.`);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        /**
+         * Função de chamada da API com lógica de retentativa.
+         */
+        async function callGeminiAPI(payload, attempt = 1) {
+            const MAX_RETRIES = 3;
+            const BASE_DELAY = 1000;
+            const apiKey = ""; // Deixe em branco
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    if (response.status === 429 && attempt < MAX_RETRIES) { // Rate limit
+                        const delay = BASE_DELAY * Math.pow(2, attempt - 1);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        return callGeminiAPI(payload, attempt + 1);
+                    }
+                    const errorText = await response.text();
+                    throw new Error(`API Error ${response.status}: ${errorText}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0].text) {
+                    return JSON.parse(result.candidates[0].content.parts[0].text);
+                } else {
+                    console.warn('Resposta da API inesperada:', result);
+                    throw new Error('A API retornou uma resposta vazia ou em formato inesperado.');
+                }
+                
+            } catch (error) {
+                if (attempt < MAX_RETRIES && error.message.includes('429')) {
+                    const delay = BASE_DELAY * Math.pow(2, attempt - 1);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return callGeminiAPI(payload, attempt + 1);
+                }
+                console.error(`Falha no Lote após ${attempt} tentativas:`, error);
+                return null; // Retorna nulo se o lote falhar
+            }
+        }
+
+        /**
+         * Controla o estado de loading da UI.
+         */
+        function setLoading(isLoading, message = 'Analisando imagens...') {
+            loadingMessage.textContent = message;
+            if (isLoading) {
+                generateButton.disabled = true;
+                loadingIndicator.classList.remove('hidden');
+                resultsSection.classList.add('hidden');
+            } else {
+                generateButton.disabled = false;
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Mostra os enigmas gerados na tela (o banco de enigmas).
+         */
+        function displayEnigmas() {
+            enigmasList.innerHTML = ''; // Limpa resultados anteriores
+            
+            let totalEnigmas = 0;
+            state.generatedBatches.forEach((batch, batchIndex) => {
+                if (!batch || !batch.enigmas) return;
+
+                const batchTitle = document.createElement('h3');
+                batchTitle.className = 'text-xl font-semibold text-gray-700 mt-4';
+                batchTitle.textContent = `Enigmas do Lote ${batchIndex + 1} (Imagens ${batchIndex * BATCH_SIZE + 1} a ${ (batchIndex + 1) * BATCH_SIZE })`;
+                enigmasList.appendChild(batchTitle);
+
+                batch.enigmas.forEach((item, enigmaIndex) => {
+                    totalEnigmas++;
+                    const enigmaElement = document.createElement('div');
+                    enigmaElement.className = 'p-4 border border-gray-200 rounded-lg bg-gray-50';
+                    enigmaElement.innerHTML = `
+                        <h4 class="text-lg font-semibold text-blue-800">Enigma ${batchIndex + 1}.${enigmaIndex + 1}</h4>
+                        <p class="text-gray-700 mt-1">${item.enigma}</p>
+                        <p class="text-sm text-green-700 font-medium mt-2">
+                            <strong>Resposta:</strong> ${item.resposta}
+                        </p>
+                    `;
+                    enigmasList.appendChild(enigmaElement);
+                });
+            });
+
+            if (totalEnigmas === 0) {
+                enigmasList.innerHTML = '<p class="text-gray-600">Nenhum enigma foi gerado. Tente novamente.</p>';
+            }
+            
+            resultsSummary.textContent = `Total de ${totalEnigmas} enigmas gerados a partir de ${state.generatedBatches.length} lotes de imagens.`;
+            resultsSection.classList.remove('hidden');
+        }
+
+        /**
+         * Gera e baixa o PDF com múltiplos tipos de prova.
+         */
+        function handleDownloadPdf() {
+            if (state.generatedBatches.length === 0) {
+                alert('Não há enigmas para baixar.');
+                return;
+            }
+
+            const doc = new jsPDF({
+                orientation: 'p',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            const margin = 20;
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const textWidth = pageWidth - (margin * 2);
+            let y; // Posição vertical
+
+            const numLotes = state.generatedBatches.length;
+
+            // --- PÁGINAS DOS ALUNOS (TIPOS DE PROVA) ---
+            for (let i = 0; i < NUM_PROVAS; i++) {
+                if (i > 0) doc.addPage();
+                y = margin;
+
+                // Título da Prova
+                doc.setFontSize(20);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Quebra-Cabeças Cooperativo', pageWidth / 2, y, { align: 'center' });
+                y += 10;
+                
+                doc.setFontSize(16);
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Folha do Aluno A - TIPO ${i + 1}`, pageWidth / 2, y, { align: 'center' });
+                y += 10;
+                
+                doc.setFontSize(11);
+                doc.setFont('helvetica', 'italic');
+                const instructions = [
+                    'Seu papel é ler estes enigmas em voz alta para seu colega.',
+                    'Você NÃO PODE olhar o livro. Seu colega NÃO PODE olhar esta folha.',
+                    'Resolvam os enigmas apenas conversando.'
+                ];
+                doc.text(instructions, margin, y);
+                y += (instructions.length * 5) + 10; // Espaçamento
+
+                // Adiciona os enigmas
+                doc.setFontSize(12);
+                let enigmaCount = 1;
+                for (let j = 0; j < numLotes; j++) {
+                    // Pega o enigma 'i' do lote 'j'
+                    const enigma = state.generatedBatches[j]?.enigmas?.[i];
+                    
+                    if (enigma) {
+                        doc.setFont('helvetica', 'bold');
+                        doc.text(`Enigma ${enigmaCount}:`, margin, y);
+                        y += 6;
+                        
+                        doc.setFont('helvetica', 'normal');
+                        const enigmaLines = doc.splitTextToSize(enigma.enigma, textWidth);
+                        doc.text(enigmaLines, margin, y);
+                        y += (enigmaLines.length * 5) + 8;
+                        enigmaCount++;
+
+                        if (y > 270) {
+                            doc.addPage();
+                            y = margin;
+                        }
+                    }
+                }
+            }
+
+            // --- PÁGINA DO GABARITO (PROFESSOR) ---
+            doc.addPage();
+            y = margin;
+            
+            doc.setFontSize(20);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Gabarito (Apenas para o Professor)', pageWidth / 2, y, { align: 'center' });
+            y += 15;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'italic');
+            doc.text('Este gabarito contém TODOS os enigmas gerados.', margin, y);
+            y += 10;
+
+            doc.setFontSize(12);
+            let fullEnigmaCount = 1;
+
+            state.generatedBatches.forEach((batch, batchIndex) => {
+                if (!batch || !batch.enigmas) return;
+
+                doc.setFontSize(14);
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Respostas do Lote ${batchIndex + 1} (Imagens ${batchIndex * BATCH_SIZE + 1} - ${ (batchIndex + 1) * BATCH_SIZE })`, margin, y);
+                y += 8;
+                doc.setFontSize(12);
+
+                batch.enigmas.forEach((item, index) => {
+                    doc.setFont('helvetica', 'bold');
+                    const enigmaTitle = `Enigma ${fullEnigmaCount} (Prova Tipo ${index + 1}):`;
+                    const enigmaLines = doc.splitTextToSize(item.enigma, textWidth - 15);
+                    doc.text(enigmaTitle, margin, y);
+                    y += 6;
+
+                    doc.setFont('helvetica', 'italic');
+                    doc.text(enigmaLines, margin + 5, y);
+                    y += (enigmaLines.length * 5) + 2;
+                    
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(0, 100, 0); // Verde
+                    const respostaLines = doc.splitTextToSize(`Resposta: ${item.resposta}`, textWidth - 15);
+                    doc.text(respostaLines, margin + 5, y);
+                    y += (respostaLines.length * 5) + 10;
+
+                    doc.setTextColor(0, 0, 0); // Reseta cor
+                    fullEnigmaCount++;
+                    
+                    if (y > 270) {
+                        doc.addPage();
+                        y = margin;
+                    }
+                });
+            });
+
+            // Salva o arquivo
+            doc.save('Enigmas_Cooperativos_Multiplas_Provas.pdf');
+        }
+
+    </script>
+</body>
+</html>
